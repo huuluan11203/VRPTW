@@ -125,7 +125,7 @@ def add_geojson_route_to_map(m, geojson_geom, color="#3388ff", popup=None):
 # --------------------------------
 @st.cache_data
 def load_customers(input_file: str):
-    p = _try_paths('input_file')
+    p = _try_paths(input_file)
     if not p:
         st.error("Không tìm thấy file customers.csv trong thư mục data/raw hoặc data.")
         return pd.DataFrame()
@@ -185,7 +185,7 @@ def load_customers(input_file: str):
     df = df.dropna(subset=['Lat', 'Long'])
     return df
 
-customers = load_customers()
+customers = load_customers("test90.csv")
 if customers.empty:
     st.stop()
 

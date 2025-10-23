@@ -1501,14 +1501,14 @@ def main(input_file: str):
 
 
 
-# if __name__ == "__main__":
-#     import sys
+if __name__ == "__main__":
+    import sys
 
-#     input_file = "test90.csv"
+    input_file = "test90.csv"
 
-#     best_sol, best_cost = run_vrptw_advanced(
-#         customers_file=input_file,
-#         max_iter=MAX_ITER,
-#         time_limit=TIME_LIMIT,
-#         use_cache=True,
-#     )
+    best_sol, best_cost = run_vrptw_advanced(
+        customers_file=input_file,
+        max_iter=MAX_ITER,
+        time_limit=TIME_LIMIT,
+        use_cache=True,
+    )

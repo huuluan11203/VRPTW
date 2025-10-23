@@ -18,4 +18,4 @@ Docker
     docker run -d -p 5000:5000 -v D:/VRPTW-Solver/app/data/raw:/data osrm/osrm-backend osrm-routed --algorithm mld /data/vietnam-latest.osrm
 
 
-streamlit run appication.py
+streamlit run application.py

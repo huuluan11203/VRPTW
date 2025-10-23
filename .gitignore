@@ -2,6 +2,8 @@
 app/data/raw/*
 !app/data/raw/.gitkeep
 
+app/solver/__pycache__/*
+
 app/data/processed/*
 !app/data/processed/.gitkeep
 
