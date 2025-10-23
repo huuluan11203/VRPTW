@@ -1,0 +1,5 @@
+.venv
+app/data/raw/*
+app/data/processed/*
+app/results/*
+
