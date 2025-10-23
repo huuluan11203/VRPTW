@@ -3,3 +3,6 @@ app/data/raw/*
 app/data/processed/*
 app/results/*
 
+!app/data/raw/.keep
+!app/data/processed/.keep
+!app/results/.keep
