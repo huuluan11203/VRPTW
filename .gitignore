@@ -1,5 +1,9 @@
 .venv
 app/data/raw/*
-app/data/processed/*
-app/results/
+!app/data/raw/.gitkeep
 
+app/data/processed/*
+!app/data/processed/.gitkeep
+
+app/results/*
+!app/results/.gitkeep
