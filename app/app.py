@@ -638,6 +638,130 @@ else:
             if any(d.get('real_distance_km') is None for d in route_data):
                 st.info("Một số tuyến dùng khoảng cách ước tính (đường thẳng) do không kết nối được OSRM (đánh dấu *).")
 
+
+            # Bảng chi tiết từng chặng của tuyến 1 (nếu có nhiều tuyến thì lặp qua d["route_idx"])
+            st.subheader("Chi tiết từng chặng (tuyến 1)")
+            legs = []
+            d = route_data[0]  # tuyến 1
+            coords = d["coordinates"]
+            ids = [0] + d["route_ids"] + [0]  # 0 = Depot
+
+            for i in range(len(coords)-1):
+                (lat1, lon1) = coords[i]
+                (lat2, lon2) = coords[i+1]
+                # Haversine cho từng chặng (km)
+                seg_km = haversine_km(lat1, lon1, lat2, lon2)
+                legs.append({
+                    "Từ ID": ids[i],
+                    "Đến ID": ids[i+1],
+                    "Khoảng cách ước tính (km)": round(seg_km, 2),
+                })
+
+            df_legs = pd.DataFrame(legs)
+            st.dataframe(df_legs, use_container_width=True, hide_index=True)
+
+
+
+            # ===== ETA/ETD per stop (giả định tốc độ di chuyển) =====
+            SPEED_KMH = 30.0  # bạn có thể đưa lên sidebar nếu muốn
+            def _col(df, up, low):
+                """Lấy cột ưu tiên 'UP' nếu có, else 'low' (để tương thích file CSV)."""
+                if up in df.columns: return up
+                return low if low in df.columns else None
+
+            # Map ID -> (ready, due, service) (đơn vị phút)
+            _ready_col = _col(customers, "READY_TIME", "ready_time")
+            _due_col   = _col(customers, "DUE_DATE",    "due_time")
+            _serv_col  = _col(customers, "SERVICE_TIME","service_time")
+
+            id2tw = {}
+            for _, r in customers.iterrows():
+                rid = int(r["ID"])
+                ready = int(r[_ready_col]) if _ready_col else 0
+                due   = int(r[_due_col])   if _due_col   else 1440
+                serv  = int(r[_serv_col])  if _serv_col  else 0
+                id2tw[rid] = (ready, due, serv)
+
+            def _fmt_hhmm(m):
+                """phút -> HH:MM (00:00–23:59+)"""
+                m = int(round(m))
+                h = m // 60
+                mm = m % 60
+                return f"{h:02d}:{mm:02d}"
+
+            def _travel_minutes_km(lat1, lon1, lat2, lon2, speed_kmh=SPEED_KMH):
+                d_km = haversine_km(lat1, lon1, lat2, lon2)
+                t_min = (d_km / speed_kmh) * 60.0
+                return d_km, t_min
+
+            # Lấy tuyến đầu (hoặc lặp qua tất cả nếu muốn)
+            st.subheader("Chi tiết thời gian")
+            tabs = st.tabs([f"Tuyến {d['route_idx']}" for d in route_data])
+            for tab, d in zip(tabs, route_data):
+                with tab:
+                    coords = d["coordinates"][:]        # [Depot, ..., Depot]
+                    stop_ids = [0] + d["route_ids"][:]  # 0 = Depot (đầu)
+                    # đảm bảo về Depot ở cuối cho phần travel cuối cùng
+                    if stop_ids[-1] != 0:
+                        stop_ids = stop_ids + [0]
+
+                    rows = []
+                    # thời điểm bắt đầu: theo TW của depot (nếu có), mặc định 0
+                    depot_ready = id2tw.get(0, (0, 1440, 0))[0]
+                    cur_time = float(depot_ready)
+                    total_drive_km = 0.0
+
+                    for leg_idx in range(len(stop_ids)-1):
+                        sid = stop_ids[leg_idx]
+                        nid = stop_ids[leg_idx+1]
+                        (lat1, lon1) = coords[leg_idx]
+                        (lat2, lon2) = coords[leg_idx+1]
+
+                        d_km, drive_min = _travel_minutes_km(lat1, lon1, lat2, lon2)
+                        total_drive_km += d_km
+                        eta = cur_time + drive_min  # đến nơi (chưa xét wait)
+
+                        # time windows của điểm đích
+                        ready, due, serv = id2tw.get(nid, (0, 1440, 0))
+                        wait = max(0.0, ready - eta)
+                        start_service = eta + wait
+                        etd = start_service + serv
+
+                        violation = ""
+                        if eta > due:
+                            violation = f"🔴 trễ cửa sổ (đến {int(eta)} > due {due})"
+
+                        rows.append({
+                            "Leg": f"{sid} → {nid}",
+                            "Di chuyển (km)": round(d_km, 2),
+                            "Di chuyển (phút)": round(drive_min, 1),
+                            "ETA (đến nơi)": _fmt_hhmm(eta),
+                            "Wait (phút)": round(wait, 1),
+                            "Bắt đầu phục vụ": _fmt_hhmm(start_service),
+                            "Service (phút)": serv,
+                            "ETD (rời đi)": _fmt_hhmm(etd),
+                            "TW đích": f"[{_fmt_hhmm(ready)}–{_fmt_hhmm(due)}]",
+                            "Vi phạm": violation,
+                        })
+
+                        # cập nhật thời gian hiện tại để đi chặng tiếp theo
+                        cur_time = etd
+
+                    df_eta = pd.DataFrame(rows)
+                    st.dataframe(df_eta, use_container_width=True, hide_index=True)
+
+                    # Tổng kết nhỏ
+                    total_drive_min = sum(r["Di chuyển (phút)"] for r in rows)
+                    st.caption(
+                        f"⏱️ Tổng thời gian di chuyển ≈ {round(total_drive_min,1)} phút "
+                        f"(~{_fmt_hhmm(total_drive_min)}), tổng quãng đường ≈ {round(total_drive_km,2)} km "
+                        f"— tốc độ giả định {SPEED_KMH:g} km/h."
+                    )
+
+
+
+            
+
             # 6) Vẽ BẢN ĐỒ KẾT QUẢ (đặt SAU khi đã có route_data)
             with st.expander("Chẩn đoán dữ liệu bản đồ", expanded=False):
                 n_routes = len(route_data)
