@@ -274,6 +274,13 @@ add_mode = st.sidebar.toggle("➕ Chế độ thêm điểm từ bản đồ", v
 if "last_click" not in st.session_state:
     st.session_state.last_click = {"lat": None, "lon": None, "ts": 0.0}
 
+
+
+# Nút mở trang "Quản lý cache tuyến"
+if st.button("🧭 Quản lý cache tuyến (route_geoms)"):
+    st.switch_page("pages/sub_app.py")   # ✅ đúng
+
+
 # =========================
 # 1) BẢN ĐỒ – CLICK ĐỂ THÊM KHÁCH
 # =========================
