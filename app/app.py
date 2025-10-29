@@ -1,6 +1,6 @@
 # app.py — VRPTW demo: Click map → Sửa trong bảng → Lưu CSV → Chạy solver → Vẽ tuyến + thống kê
 from pathlib import Path
-import os, json, random, time, importlib.util, sys, traceback
+import os, json, random, time, importlib.util, sys, traceback, math
 import pandas as pd
 import streamlit as st
 import folium
@@ -123,8 +123,18 @@ def calculate_real_route_costs(routes, customers_df, depot_coord):
         total_real_cost += cost_km
     return route_data, total_real_cost
 
-# ===== DivIcon: nhãn STT trên map =====
+# ===== DivIcon: nhãn STT trên map (đã phòng NaN) =====
 def add_number_label(map_obj, lat, lon, text, color="#2b8a3e"):
+    # chặn None/NaN/format lỗi
+    if lat is None or lon is None:
+        return
+    try:
+        lat = float(lat); lon = float(lon)
+    except (TypeError, ValueError):
+        return
+    if math.isnan(lat) or math.isnan(lon):
+        return
+
     folium.Marker(
         [lat, lon],
         icon=folium.DivIcon(
@@ -189,6 +199,7 @@ def _validate_points(df_points: pd.DataFrame):
         msgs.append(f"Đã tự sửa {bad_tw.sum()} dòng có due_time < ready_time (set bằng ready_time).")
         df.loc[bad_tw, "due_time"] = df.loc[bad_tw, "ready_time"]
     df = df.drop_duplicates(subset=["Lat","Long","ready_time","due_time","demand","service_time"])
+    df = df.dropna(subset=["Lat","Long"])  # đảm bảo không còn NaN toạ độ
     if len(df) == 0:
         msgs.append("Không còn khách hợp lệ sau khi lọc.")
     return df, msgs
@@ -274,12 +285,9 @@ add_mode = st.sidebar.toggle("➕ Chế độ thêm điểm từ bản đồ", v
 if "last_click" not in st.session_state:
     st.session_state.last_click = {"lat": None, "lon": None, "ts": 0.0}
 
-
-
 # Nút mở trang "Quản lý cache tuyến"
 if st.button("🧭 Quản lý cache tuyến (route_geoms)"):
     st.switch_page("pages/sub_app.py")   # ✅ đúng
-
 
 # =========================
 # 1) BẢN ĐỒ – CLICK ĐỂ THÊM KHÁCH
@@ -291,12 +299,20 @@ folium.Marker(
     icon=folium.Icon(color="red", icon="home", prefix='fa')
 ).add_to(m)
 
-# các điểm đã chọn (đánh STT)
+# các điểm đã chọn (đánh STT) — đã phòng NaN
 for idx, row in enumerate(st.session_state.picked, start=1):
-    add_number_label(m, row["Lat"], row["Long"], text=str(idx), color="#2b8a3e")
-    # popup thông tin
-    folium.Marker([row["Lat"], row["Long"]], opacity=0).add_child(
-        folium.Popup(f'#{idx} — ID {row["ID"]} (d={row["demand"]})')
+    lat = row.get("Lat"); lon = row.get("Long")
+    # bỏ qua nếu thiếu hoặc NaN
+    try:
+        lat = float(lat); lon = float(lon)
+    except (TypeError, ValueError):
+        continue
+    if math.isnan(lat) or math.isnan(lon):
+        continue
+
+    add_number_label(m, lat, lon, text=str(idx), color="#2b8a3e")
+    folium.Marker([lat, lon], opacity=0).add_child(
+        folium.Popup(f'#{idx} — ID {row.get("ID","?")} (d={row.get("demand","?")})')
     ).add_to(m)
 
 # gợi ý trực quan click
@@ -310,7 +326,7 @@ if add_mode and output and output.get("last_clicked"):
     same_spot = (prev["lat"] is not None and abs(prev["lat"]-lat) < 1e-6 and abs(prev["lon"]-lon) < 1e-6)
     fast = (now - prev["ts"] < 0.4)
     if not (same_spot or fast):
-        next_id = 1 if not st.session_state.picked else max(p["ID"] for p in st.session_state.picked) + 1
+        next_id = 1 if not st.session_state.picked else max(p.get("ID", 0) for p in st.session_state.picked) + 1
         st.session_state.picked.append({
             "ID": next_id, "Lat": lat, "Long": lon,
             "demand": int(default_demand), "ready_time": int(default_ready),
@@ -354,11 +370,30 @@ if not st.session_state.picked_df.empty:
         clear_all = c3.form_submit_button("Xoá tất cả", use_container_width=False)
 
     if apply_btn:
+        # --- Làm sạch dữ liệu để tránh NaN khi vẽ map ---
         df_new = edited.copy()
+
+        # ép kiểu về số; giá trị không hợp lệ -> NaN
+        for c in ["Lat", "Long", "demand", "ready_time", "due_time", "service_time"]:
+            df_new[c] = pd.to_numeric(df_new[c], errors="coerce")
+
+        # loại các hàng thiếu toạ độ
+        before = len(df_new)
+        df_new = df_new.dropna(subset=["Lat", "Long"])
+        after = len(df_new)
+        if after < before:
+            st.warning(f"Đã loại {before-after} dòng do thiếu Lat/Long.")
+
+        # điền mặc định cho các cột số còn NaN
+        for c in ["demand", "ready_time", "due_time", "service_time"]:
+            df_new[c] = df_new[c].fillna(0).astype(int)
+
+        # chuẩn hoá ID theo thứ tự mới
         df_new = df_new[["ID","Lat","Long","demand","ready_time","due_time","service_time"]]
-        df_new = _normalize_ids(df_new)
-        st.session_state.picked_df = df_new.reset_index(drop=True)
-        st.session_state.picked = st.session_state.picked_df.to_dict(orient="records")
+        df_new = _normalize_ids(df_new).reset_index(drop=True)
+
+        st.session_state.picked_df = df_new
+        st.session_state.picked = df_new.to_dict(orient="records")
         st.success("Đã áp dụng chỉnh sửa.")
     elif del_last:
         if not st.session_state.picked_df.empty:
